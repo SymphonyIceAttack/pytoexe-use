@@ -26,28 +26,62 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull origin main
           
-          # Find and delete EXE files older than 10 minutes
-          find exe-files -type f -name "*.exe" -mmin +10 -delete
+          current_time=$(date +%s)
+          cutoff_time=$((current_time - 600)) # 10 minutes ago
           
-          # Find and delete Python files older than 10 minutes (backup cleanup)
-          find python-files -type f -name "*.py" -mmin +10 -delete
+          files_to_delete=""
           
-          # Commit cleanup if there are changes
-          git add exe-files/ python-files/
-          if ! git diff --staged --quiet; then
-            git commit -m "Clean up old files [skip ci]"
-            
-            # Retry push up to 3 times
-            for i in {1..3}; do
-              if git push; then
-                echo "Successfully pushed cleanup"
-                break
-              else
-                echo "Push failed, retry $i of 3"
-                git pull --rebase origin main
-                sleep 2
+          # Check EXE files
+          if [ -d "exe-files" ]; then
+            for file in exe-files/*.exe; do
+              if [ -f "$file" ]; then
+                # Get the commit timestamp of when this file was last modified
+                commit_time=$(git log -1 --format=%ct -- "$file" 2>/dev/null || echo "0")
+                
+                if [ "$commit_time" -lt "$cutoff_time" ] && [ "$commit_time" -ne "0" ]; then
+                  echo "Marking $file for deletion (committed at $commit_time, cutoff $cutoff_time)"
+                  rm "$file"
+                  files_to_delete="yes"
+                else
+                  echo "Keeping $file (committed at $commit_time)"
+                fi
               fi
             done
+          fi
+          
+          # Check Python files (backup cleanup)
+          if [ -d "python-files" ]; then
+            for file in python-files/*.py; do
+              if [ -f "$file" ]; then
+                commit_time=$(git log -1 --format=%ct -- "$file" 2>/dev/null || echo "0")
+                
+                if [ "$commit_time" -lt "$cutoff_time" ] && [ "$commit_time" -ne "0" ]; then
+                  echo "Marking $file for deletion (committed at $commit_time, cutoff $cutoff_time)"
+                  rm "$file"
+                  files_to_delete="yes"
+                fi
+              fi
+            done
+          fi
+          
+          # Commit cleanup if there are changes
+          if [ -n "$files_to_delete" ]; then
+            git add exe-files/ python-files/
+            if ! git diff --staged --quiet; then
+              git commit -m "Clean up old files [skip ci]"
+              
+              # Retry push up to 3 times
+              for i in {1..3}; do
+                if git push; then
+                  echo "Successfully pushed cleanup"
+                  break
+                else
+                  echo "Push failed, retry $i of 3"
+                  git pull --rebase origin main
+                  sleep 2
+                fi
+              done
+            fi
           else
             echo "No files to clean up"
           fi
