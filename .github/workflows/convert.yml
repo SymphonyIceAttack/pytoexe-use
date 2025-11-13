@@ -4,8 +4,7 @@ on:
   push:
     paths:
       - 'python-files/**/*.py'
-  schedule:
-    - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,7 +13,7 @@ permissions:
 jobs:
   convert:
     runs-on: windows-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     concurrency:
       group: convert-${{ github.sha }}
       cancel-in-progress: false
@@ -53,6 +52,14 @@ jobs:
             }
           }
 
+      - name: Add timestamp to EXE files
+        run: |
+          $timestamp = Get-Date -Format "yyyyMMddHHmmss"
+          Get-ChildItem exe-files -Filter *.exe | ForEach-Object {
+            $newName = "$($_.BaseName)_$timestamp.txt"
+            Set-Content -Path "exe-files/$newName" -Value $timestamp
+          }
+
       - name: Commit EXE files with retry
         if: steps.changed-files.outputs.all_changed_files != ''
         run: |
@@ -69,8 +76,8 @@ jobs:
               # Pull latest changes to avoid conflicts
               git pull --rebase origin main
               
-              # Add and commit EXE files
-              git add exe-files/*.exe
+              # Add and commit EXE files and timestamps
+              git add exe-files/
               
               # Only commit if there are changes
               if (git diff --staged --quiet) {
@@ -95,59 +102,51 @@ jobs:
               }
             }
           }
-
-  cleanup:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    concurrency:
-      group: cleanup
-      cancel-in-progress: false
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
-          fetch-depth: 0
-
-      - name: Clean up old files (older than 10 minutes)
+      
+      - name: Clean up old Python files
         run: |
+          git pull origin main
+          Remove-Item python-files/*.py -Force -ErrorAction SilentlyContinue
+          git add python-files/
+          if (-not (git diff --staged --quiet)) {
+            git commit -m "Clean up Python files [skip ci]"
+            git push
+          }
+
+      - name: Trigger cleanup after 10 minutes
+        run: |
+          Start-Sleep -Seconds 600
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Pull latest changes
           git pull origin main
           
-          # Find and delete EXE files older than 10 minutes
-          find exe-files -name "*.exe" -type f -mmin +10 -delete || true
+          # Get current timestamp
+          $currentTime = Get-Date
           
-          # Find and delete Python files older than 10 minutes (keep the folder)
-          find python-files -name "*.py" -type f -mmin +10 -delete || true
+          # Find and delete EXE files older than 10 minutes based on timestamp files
+          Get-ChildItem exe-files -Filter *.txt | ForEach-Object {
+            $timestamp = Get-Content $_.FullName
+            $fileTime = [DateTime]::ParseExact($timestamp, "yyyyMMddHHmmss", $null)
+            $age = ($currentTime - $fileTime).TotalMinutes
+            
+            if ($age -gt 10) {
+              $baseName = $_.BaseName -replace '_\d{14}$', ''
+              $exeFile = "exe-files/$baseName.exe"
+              
+              if (Test-Path $exeFile) {
+                Remove-Item $exeFile -Force
+                Write-Host "Deleted old EXE: $exeFile"
+              }
+              
+              Remove-Item $_.FullName -Force
+              Write-Host "Deleted timestamp file: $($_.Name)"
+            }
+          }
           
-          # Commit all changes in a single commit with retry logic
-          git add -A
-          
-          if git diff --staged --quiet; then
-            echo "No old files to clean up"
-            exit 0
-          fi
-          
-          # Retry commit with pull if needed
-          max_retries=3
-          retry_count=0
-          
-          while [ $retry_count -lt $max_retries ]; do
-            if git commit -m "Clean up files older than 10 minutes [skip ci]" && git push; then
-              echo "Successfully cleaned up old files"
-              exit 0
-            else
-              retry_count=$((retry_count + 1))
-              echo "Cleanup commit failed, retry $retry_count of $max_retries"
-              git pull --rebase origin main
-              sleep 2
-            fi
-          done
-          
-          echo "Failed to commit cleanup after $max_retries retries"
-          exit 1
+          # Commit cleanup
+          git add exe-files/
+          if (-not (git diff --staged --quiet)) {
+            git commit -m "Clean up old EXE files [skip ci]"
+            git push
+          }
