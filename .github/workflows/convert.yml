@@ -103,3 +103,20 @@ jobs:
           else
             echo "No old files to clean up"
           fi
+      
+      - name: Clean up old Python files in python-files (older than 10 minutes)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Find and delete Python files older than 10 minutes (keep the folder)
+          find python-files -name "*.py" -type f -mmin +10 -delete
+          
+          # Commit the changes if any files were deleted
+          git add -A
+          if ! git diff --staged --quiet; then
+            git commit -m "Clean up Python files older than 10 minutes"
+            git push
+          else
+            echo "No old Python files to clean up"
+          fi
