@@ -1,0 +1,53 @@
+name: Cleanup Old Files
+
+on:
+  schedule:
+    # Run every 10 minutes
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Clean up old EXE files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main
+          
+          # Find and delete EXE files older than 10 minutes
+          find exe-files -type f -name "*.exe" -mmin +10 -delete
+          
+          # Find and delete Python files older than 10 minutes (backup cleanup)
+          find python-files -type f -name "*.py" -mmin +10 -delete
+          
+          # Commit cleanup if there are changes
+          git add exe-files/ python-files/
+          if ! git diff --staged --quiet; then
+            git commit -m "Clean up old files [skip ci]"
+            
+            # Retry push up to 3 times
+            for i in {1..3}; do
+              if git push; then
+                echo "Successfully pushed cleanup"
+                break
+              else
+                echo "Push failed, retry $i of 3"
+                git pull --rebase origin main
+                sleep 2
+              fi
+            done
+          else
+            echo "No files to clean up"
+          fi
