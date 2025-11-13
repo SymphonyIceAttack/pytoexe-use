@@ -52,14 +52,6 @@ jobs:
             }
           }
 
-      - name: Add timestamp to EXE files
-        run: |
-          $timestamp = Get-Date -Format "yyyyMMddHHmmss"
-          Get-ChildItem exe-files -Filter *.exe | ForEach-Object {
-            $newName = "$($_.BaseName)_$timestamp.txt"
-            Set-Content -Path "exe-files/$newName" -Value $timestamp
-          }
-
       - name: Commit EXE files with retry
         if: steps.changed-files.outputs.all_changed_files != ''
         run: |
@@ -76,7 +68,7 @@ jobs:
               # Pull latest changes to avoid conflicts
               git pull --rebase origin main
               
-              # Add and commit EXE files and timestamps
+              # Add and commit EXE files
               git add exe-files/
               
               # Only commit if there are changes
@@ -103,50 +95,12 @@ jobs:
             }
           }
       
-      - name: Clean up old Python files
+      - name: Clean up Python source files
         run: |
           git pull origin main
           Remove-Item python-files/*.py -Force -ErrorAction SilentlyContinue
           git add python-files/
           if (-not (git diff --staged --quiet)) {
             git commit -m "Clean up Python files [skip ci]"
-            git push
-          }
-
-      - name: Trigger cleanup after 10 minutes
-        run: |
-          Start-Sleep -Seconds 600
-          
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull origin main
-          
-          # Get current timestamp
-          $currentTime = Get-Date
-          
-          # Find and delete EXE files older than 10 minutes based on timestamp files
-          Get-ChildItem exe-files -Filter *.txt | ForEach-Object {
-            $timestamp = Get-Content $_.FullName
-            $fileTime = [DateTime]::ParseExact($timestamp, "yyyyMMddHHmmss", $null)
-            $age = ($currentTime - $fileTime).TotalMinutes
-            
-            if ($age -gt 10) {
-              $baseName = $_.BaseName -replace '_\d{14}$', ''
-              $exeFile = "exe-files/$baseName.exe"
-              
-              if (Test-Path $exeFile) {
-                Remove-Item $exeFile -Force
-                Write-Host "Deleted old EXE: $exeFile"
-              }
-              
-              Remove-Item $_.FullName -Force
-              Write-Host "Deleted timestamp file: $($_.Name)"
-            }
-          }
-          
-          # Commit cleanup
-          git add exe-files/
-          if (-not (git diff --staged --quiet)) {
-            git commit -m "Clean up old EXE files [skip ci]"
             git push
           }
