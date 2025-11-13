@@ -15,6 +15,9 @@ jobs:
   convert:
     runs-on: windows-latest
     if: github.event_name == 'push'
+    concurrency:
+      group: convert-${{ github.sha }}
+      cancel-in-progress: false
     
     steps:
       - name: Checkout repository
@@ -22,6 +25,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -49,36 +53,55 @@ jobs:
             }
           }
 
-      - name: Commit EXE files
+      - name: Commit EXE files with retry
         if: steps.changed-files.outputs.all_changed_files != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add exe-files/*.exe
-          git commit -m "Add converted EXE files" || echo "No new files to commit"
-          git push
-
-      - name: Clean up Python files
-        if: steps.changed-files.outputs.all_changed_files != ''
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          $files = "${{ steps.changed-files.outputs.all_changed_files }}" -split ' '
-          foreach ($file in $files) {
-            if (Test-Path $file) {
-              git rm $file
+          
+          # Retry up to 3 times with pull before push
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+          
+          while (-not $success -and $retryCount -lt $maxRetries) {
+            try {
+              # Pull latest changes to avoid conflicts
+              git pull --rebase origin main
+              
+              # Add and commit EXE files
+              git add exe-files/*.exe
+              
+              # Only commit if there are changes
+              if (git diff --staged --quiet) {
+                Write-Host "No new files to commit"
+                $success = $true
+                break
+              }
+              
+              git commit -m "Add converted EXE files [skip ci]"
+              git push
+              $success = $true
+              Write-Host "Successfully committed EXE files"
             }
-          }
-          if (git diff --staged --quiet) {
-            Write-Host "No files to clean up"
-          } else {
-            git commit -m "Clean up converted Python files"
-            git push
+            catch {
+              $retryCount++
+              Write-Host "Commit failed, retry $retryCount of $maxRetries"
+              Start-Sleep -Seconds 2
+              
+              if ($retryCount -eq $maxRetries) {
+                Write-Host "Failed to commit after $maxRetries retries"
+                throw
+              }
+            }
           }
 
   cleanup:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
+    concurrency:
+      group: cleanup
+      cancel-in-progress: false
     
     steps:
       - name: Checkout repository
@@ -86,37 +109,45 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
+          fetch-depth: 0
 
-      - name: Delete old EXE files (older than 10 minutes)
+      - name: Clean up old files (older than 10 minutes)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Pull latest changes
+          git pull origin main
           
           # Find and delete EXE files older than 10 minutes
-          find exe-files -name "*.exe" -type f -mmin +10 -delete
-          
-          # Commit the changes if any files were deleted
-          git add -A
-          if ! git diff --staged --quiet; then
-            git commit -m "Clean up EXE files older than 10 minutes"
-            git push
-          else
-            echo "No old files to clean up"
-          fi
-      
-      - name: Clean up old Python files in python-files (older than 10 minutes)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          find exe-files -name "*.exe" -type f -mmin +10 -delete || true
           
           # Find and delete Python files older than 10 minutes (keep the folder)
-          find python-files -name "*.py" -type f -mmin +10 -delete
+          find python-files -name "*.py" -type f -mmin +10 -delete || true
           
-          # Commit the changes if any files were deleted
+          # Commit all changes in a single commit with retry logic
           git add -A
-          if ! git diff --staged --quiet; then
-            git commit -m "Clean up Python files older than 10 minutes"
-            git push
-          else
-            echo "No old Python files to clean up"
+          
+          if git diff --staged --quiet; then
+            echo "No old files to clean up"
+            exit 0
           fi
+          
+          # Retry commit with pull if needed
+          max_retries=3
+          retry_count=0
+          
+          while [ $retry_count -lt $max_retries ]; do
+            if git commit -m "Clean up files older than 10 minutes [skip ci]" && git push; then
+              echo "Successfully cleaned up old files"
+              exit 0
+            else
+              retry_count=$((retry_count + 1))
+              echo "Cleanup commit failed, retry $retry_count of $max_retries"
+              git pull --rebase origin main
+              sleep 2
+            fi
+          done
+          
+          echo "Failed to commit cleanup after $max_retries retries"
+          exit 1
