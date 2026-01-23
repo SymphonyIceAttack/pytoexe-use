@@ -1,1 +1,0 @@
-pyinstaller --onefile --windowed --name="JP3D_MODS_EDIT" JP3D_MODS_EDIT.py
