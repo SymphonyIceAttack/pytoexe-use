@@ -1,1 +1,0 @@
- Invalid HTML Table input. 
