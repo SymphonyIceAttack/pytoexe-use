@@ -1,0 +1,124 @@
+#coding:936
+#Copyright 2025 By Stuff233_Zhou
+from enum import global_enum
+from re import U
+import time
+import random
+import sys
+import math
+import cmath
+import os
+os.system("title Let's Have Sex v1.0 By Stuff233_Zhou")
+os.system("color 0c")
+print("��ӭʹ���ջ�һ������ϵͳ v1.0")
+print("Copyright 2025 By Stuff233_Zhou")
+time.sleep(1)
+print("����2����ʱ���ѿ���,׼��������")
+time.sleep(2)
+print("�ַ�����?")
+print("ѡ��һ����0��������!")
+print("������xkse4��xcmds��λ�����ջ�,����ˬ��")
+
+
+def HaveSex(choice):
+    global tmpchoice
+    tmp1=random.randint(3,5)
+    tmp2=random.randint(3,10)
+    tmp3=random.randint(5,9)
+    wait1=tmp1/tmp2
+    wait2=tmp3/tmp2
+    if wait1 < wait2 :
+        awsl=wait2
+        wait2=wait1
+        wait1=awsl
+    if choice == "1":
+      print("��ѡ����xkse4,����һ���ǳ�������ջ�,��������һҹ���İ�")
+      time.sleep(wait2)
+      print("�ڶ������������������Ѿ�������,ֻ������һ��ֽ��")
+      time.sleep(wait2)
+      print("ֽ����д��: '����,������...��Ȼ��һֱ��֪���㳤��˧,����'")
+      print("�㻳�����������������ֽ��,�������¿�")
+      time.sleep(wait1)
+      print("'û�뵽��...������ô��,���һ������ô��,����,�Һ�ˬ")
+      time.sleep(wait1)
+      print("��е�������������,�������¿�")
+      time.sleep(wait1)
+      print("'лл���������鵽��ǰ��δ�еĿ��,�һ���Զ��ס��ξ�����'")
+      time.sleep(wait1)
+      print("��е�����һ����ů,�������¿�")
+      time.sleep(wait1)
+      print("'ϣ���Ժ����л������������,����,�һ�һֱ�����,�������Ѿ���ס������ĸо���'")
+      time.sleep(wait1)
+      print("ֽ������󻹻���һ������")
+      time.sleep(wait1)
+      print("�����ֽ����,����е��ޱȵ�������Ҹ�")
+      time.sleep(wait1)
+      print("������Ժ�һ��Ҫ����������ջ�����")
+      time.sleep(wait1)
+      print("��������,xkse4����,��ֻ��ȥ��xcmds����й����")
+      tmpchoice = "2"
+    elif choice == "2":
+        print("��ѡ����xcmds,����һ���ǳ�������ջ�,��������һҹ���۵İ�")
+        time.sleep(wait2)
+        print("�ڶ��������������������Ѿ�������,ֻ������һ��ֽ��")
+        print("ֽ����д��: '����,�����������Ҷ�û�о�'")
+        print("'�´�����������,��һ��Ҫ�����ҧ��'")
+        time.sleep(wait1)
+        print("'��ס,�����������,��Զ��������'")
+        time.sleep(wait1)
+        print("'��Ȼ���Ǹ�����������.�����������ζ��������'")
+        print("'�´�������������ʱ��,�ǵö����'")
+        time.sleep(wait1)
+        print("'��������������Ӵ~'")
+        time.sleep(wait1)
+        print("�����ֽ����,��Ӳ��,����������,�����㿪ʼѰ�Ҹ��յ�xkse4")
+        tmpchoice = "1"
+    elif choice == "3":
+        print("��ѡ����֣����,�����ڽ����������ʢ��Ļ���,Ȼ��ȹ���һ�����������ҹ��")
+        time.sleep(wait2)
+        print("�Ӵ����ǹ������Ҹ����ֵ�����,ֱ����Զ")
+        print("��ϲ���ҵ����������氮!")
+        time.sleep(wait1)
+        print("THE END")
+        time.sleep(wait1)
+        print("���Ҳ�,��ô������Ʒζ����һ����ô��")
+        time.sleep(wait1)
+        print("�������ݴ����Զ�����,�������޹�(������仰Ҳ��Microsoft Visual Studio 2026�Զ�����)")
+        time.sleep(wait2)
+        print("ѡ��֣������Ϊ�Լ��İ���")
+        time.sleep(wait1)
+        print("����̫�ѵ���")
+        time.sleep(wait1)
+        print("�������²¿�")
+        print("��Ҳ�Ǹ��ջ��԰�")
+        time.sleep(wait1)
+        print("������,��Ȼû�´�")
+        print("������Ҳ�Ǹ��ջ�")
+        time.sleep(wait1)
+        print("��Ȼ���,�����Ǿ�ע��Ҫ��һ����")
+        time.sleep(wait2)
+        print("������,����Ц��")
+        time.sleep(wait1)
+        print("����˵���,��ѡ֣����Ļ�")
+        time.sleep(wait1)
+        print("������ע��Ҫ����һ�ӆ���һ݅����")
+        time.sleep(wait1)
+        print("���ǲ��ò�˵,���֣���������հ�")
+        print("����֮���æ���������,Ҳ��Ӧ�õ�(��λ���Microsoft Visual Studio 2026�Զ�����,�������޹�)")
+        tmpchoice = "3"
+    else:
+        print("��Ч��ѡ��,������ѡ�񲢿���,�ǵ��ѿ���,���Ҳ�Ҫ����")
+    return tmpchoice
+
+
+userchoice = input("����1����xkse4����һҹ��,����2����xcmds����,����3��֣����ԭ�ؽ�鲢����������")
+
+# start the first encounter using the user's choice
+a =1
+print("�������", str(a) + '������')
+HaveSex(userchoice)
+
+print("�������⻰:�߶˵Ĵ���༭��,Ӧ���ܹ��Զ�����С����")
+print("�����㿴���VS2026 ���ɳ�����С����һ�㶼�������Ҽ���������xkse4ÿ�����ϵ�����")
+print("����xcmds��λ,����,��˵��,��һ���ɻ���׼�����ݾ���")
+os.system("pause")
