@@ -1,0 +1,631 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from tkinter import scrolledtext
+import re
+import os
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+
+# Попытка импорта openpyxl
+try:
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    messagebox.showerror("Ошибка", "Библиотека 'openpyxl' не найдена.\nУстановите: pip install openpyxl")
+    exit()
+
+# ----------------------------------------------------------------------
+# Вспомогательные функции (те же, что в консольной версии)
+# ----------------------------------------------------------------------
+def safe_xml(text: str) -> str:
+    if not isinstance(text, str):
+        text = str(text)
+    replacements = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'}
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+def format_date(date_value: Any) -> str:
+    if not date_value:
+        return ""
+    if isinstance(date_value, str):
+        date_str = date_value.strip()
+        if not date_str:
+            return ""
+        cleaned = re.sub(r'[./]', '-', date_str)
+        patterns = [
+            (r'^(\d{4})-(\d{1,2})-(\d{1,2})$', False),
+            (r'^(\d{1,2})-(\d{1,2})-(\d{4})$', True),
+        ]
+        for pattern, is_dmy in patterns:
+            match = re.match(pattern, cleaned)
+            if match:
+                if is_dmy:
+                    day, month, year = match.group(1), match.group(2), match.group(3)
+                else:
+                    year, month, day = match.group(1), match.group(2), match.group(3)
+                try:
+                    dt = datetime(int(year), int(month), int(day))
+                    return dt.strftime("%Y-%m-%d")
+                except:
+                    continue
+        for fmt in ("%d.%m.%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime("%Y-%m-%d")
+            except:
+                continue
+        return date_str
+    if isinstance(date_value, (int, float)):
+        try:
+            from datetime import timedelta
+            excel_base = datetime(1899, 12, 30)
+            dt = excel_base + timedelta(days=date_value)
+            return dt.strftime("%Y-%m-%d")
+        except:
+            return str(date_value)
+    if isinstance(date_value, datetime):
+        return date_value.strftime("%Y-%m-%d")
+    return str(date_value)
+
+def is_unfit(value: Any) -> bool:
+    if not value:
+        return False
+    val = str(value).strip().lower()
+    return val in ('непригодно', 'непригоден', 'брак', 'false', 'нет', '0')
+
+def normalize_verification_result(value: Any) -> str:
+    if not value:
+        return 'пригодно'
+    val = str(value).strip().lower()
+    if val in ('не пригоден', 'непригоден', 'непригодно', 'брак', 'false', 'нет', '0'):
+        return 'непригодно'
+    if val in ('пригодно', 'годен', 'true', 'да', '1', '+'):
+        return 'пригодно'
+    return val
+
+def split_full_name(full_name: str) -> Dict[str, str]:
+    if not full_name:
+        return {'lastName': 'Неизвестно', 'firstName': 'Неизвестно'}
+    parts = str(full_name).strip().split()
+    if len(parts) >= 2:
+        return {'lastName': parts[0], 'firstName': parts[1]}
+    return {'lastName': 'Неизвестно', 'firstName': 'Неизвестно'}
+
+# ----------------------------------------------------------------------
+# Генерация XML (те же функции, что были)
+# ----------------------------------------------------------------------
+def generate_arshin_xml(data_rows: List[List[str]]) -> str:
+    xml_lines = ['<?xml version="1.0" encoding="utf-8"?>']
+    xml_lines.append('<gost:application xmlns:gost="urn://fgis-arshin.gost.ru/module-verifications/import/2020-06-19">')
+    for row in data_rows:
+        if not row or not row[0]:
+            continue
+        values = row + [''] * (22 - len(row))
+        num_grsi, serial_num, year, modification = values[0], values[1], values[2], values[3]
+        sign_cipher, owner, vrf_date, valid_date = values[4], values[5], values[6], values[7]
+        applicability, reason_unfit = values[8], values[9]
+        doc_title, metrologist, etalon_num = values[10], values[11], values[12]
+        mi_types = [values[13], values[14], values[15]]
+        mi_serials = [values[16], values[17], values[18]]
+        temperature, pressure, humidity = values[19], values[20], values[21]
+
+        xml_lines.append('    <gost:result>')
+        xml_lines.append('        <gost:miInfo><gost:singleMI>')
+        xml_lines.append(f'            <gost:mitypeNumber>{safe_xml(num_grsi)}</gost:mitypeNumber>')
+        xml_lines.append(f'            <gost:manufactureNum>{safe_xml(serial_num)}</gost:manufactureNum>')
+        if year:
+            xml_lines.append(f'            <gost:manufactureYear>{safe_xml(year)}</gost:manufactureYear>')
+        if modification:
+            xml_lines.append(f'            <gost:modification>{safe_xml(modification)}</gost:modification>')
+        xml_lines.append('        </gost:singleMI></gost:miInfo>')
+        if sign_cipher:
+            xml_lines.append(f'        <gost:signCipher>{safe_xml(sign_cipher)}</gost:signCipher>')
+        if owner:
+            xml_lines.append(f'        <gost:miOwner>{safe_xml(owner)}</gost:miOwner>')
+        xml_lines.append(f'        <gost:vrfDate>{format_date(vrf_date)}</gost:vrfDate>')
+        if not is_unfit(applicability) and valid_date:
+            xml_lines.append(f'        <gost:validDate>{format_date(valid_date)}</gost:validDate>')
+        xml_lines.append('        <gost:type>2</gost:type>')
+        xml_lines.append('        <gost:calibration>false</gost:calibration>')
+        if is_unfit(applicability):
+            xml_lines.append('        <gost:inapplicable>')
+            reason = reason_unfit if reason_unfit else 'Причина не указана'
+            xml_lines.append(f'            <gost:reasons>{safe_xml(reason)}</gost:reasons>')
+            xml_lines.append('        </gost:inapplicable>')
+        else:
+            xml_lines.append('        <gost:applicable><gost:signPass>true</gost:signPass><gost:signMi>true</gost:signMi></gost:applicable>')
+        if doc_title:
+            xml_lines.append(f'        <gost:docTitle>{safe_xml(doc_title)}</gost:docTitle>')
+        if metrologist:
+            xml_lines.append(f'        <gost:metrologist>{safe_xml(metrologist)}</gost:metrologist>')
+        xml_lines.append('        <gost:means>')
+        if etalon_num:
+            xml_lines.append(f'            <gost:mieta><gost:number>{safe_xml(etalon_num)}</gost:number></gost:mieta>')
+        has_extra = any(t and s for t, s in zip(mi_types, mi_serials))
+        if has_extra:
+            xml_lines.append('            <gost:mis>')
+            for mt, ms in zip(mi_types, mi_serials):
+                if mt and ms:
+                    xml_lines.append('                <gost:mi>')
+                    xml_lines.append(f'                    <gost:typeNum>{safe_xml(mt)}</gost:typeNum>')
+                    xml_lines.append(f'                    <gost:manufactureNum>{safe_xml(ms)}</gost:manufactureNum>')
+                    xml_lines.append('                </gost:mi>')
+            xml_lines.append('            </gost:mis>')
+        xml_lines.append('        </gost:means>')
+        if temperature or pressure or humidity:
+            xml_lines.append('        <gost:conditions>')
+            if temperature:
+                xml_lines.append(f'            <gost:temperature>{safe_xml(temperature.replace(".", ","))}</gost:temperature>')
+            if pressure:
+                xml_lines.append(f'            <gost:pressure>{safe_xml(pressure.replace(".", ","))}</gost:pressure>')
+            if humidity:
+                xml_lines.append(f'            <gost:hymidity>{safe_xml(humidity.replace(".", ","))}</gost:hymidity>')
+            xml_lines.append('        </gost:conditions>')
+        xml_lines.append('    </gost:result>')
+    xml_lines.append('</gost:application>')
+    return '\n'.join(xml_lines)
+
+def generate_accreditation_xml(data_rows: List[List[str]]) -> str:
+    xml_lines = ["<?xml version='1.0' encoding='UTF-8'?>"]
+    xml_lines.append('<Message xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="schema.xsd">')
+    xml_lines.append('  <VerificationMeasuringInstrumentData>')
+    for row in data_rows:
+        if not row or not row[0]:
+            continue
+        values = row + [''] * (7 - len(row))
+        number_verif = values[0]
+        type_mi = values[1]
+        date_verif = format_date(values[2])
+        date_end = format_date(values[3])
+        result_raw = values[4]
+        snils = values[5]
+        full_name = values[6]
+        result_code = '1' if normalize_verification_result(result_raw) == 'пригодно' else '2'
+        name_parts = split_full_name(full_name)
+
+        xml_lines.append('    <VerificationMeasuringInstrument>')
+        xml_lines.append(f'      <NumberVerification>{safe_xml(number_verif)}</NumberVerification>')
+        xml_lines.append(f'      <DateVerification>{date_verif}</DateVerification>')
+        xml_lines.append(f'      <DateEndVerification>{date_end}</DateEndVerification>')
+        xml_lines.append(f'      <TypeMeasuringInstrument>{safe_xml(type_mi)}</TypeMeasuringInstrument>')
+        xml_lines.append('      <ApprovedEmployees>')
+        xml_lines.append('        <Name>')
+        xml_lines.append(f'          <Last>{safe_xml(name_parts["lastName"])}</Last>')
+        xml_lines.append(f'          <First>{safe_xml(name_parts["firstName"])}</First>')
+        xml_lines.append('        </Name>')
+        xml_lines.append(f'        <SNILS>{safe_xml(snils)}</SNILS>')
+        xml_lines.append('      </ApprovedEmployees>')
+        xml_lines.append(f'      <ResultVerification>{result_code}</ResultVerification>')
+        xml_lines.append('    </VerificationMeasuringInstrument>')
+    xml_lines.append('  </VerificationMeasuringInstrumentData>')
+    xml_lines.append('  <SaveMethod>1</SaveMethod>')
+    xml_lines.append('</Message>')
+    return '\n'.join(xml_lines)
+
+# ----------------------------------------------------------------------
+# Работа с Excel (шаблоны и чтение)
+# ----------------------------------------------------------------------
+def create_arshin_template(filepath: str):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Данные для Аршин"
+    headers = [
+        "Номер в ГРСИ", "Заводской номер", "Год выпуска", "Модификация",
+        "Шифр знака", "Владелец СИ", "Дата поверки", "Дата действия",
+        "Пригодность", "Причина непригодности", "Наименование документа", "ФИО метролога",
+        "Номер СИ/эталона", "Тип СИ 1", "Тип СИ 2", "Тип СИ 3",
+        "Заводской номер СИ 1", "Заводской номер СИ 2", "Заводской номер СИ 3",
+        "Температура", "Давление", "Влажность"
+    ]
+    example = [
+        "47957-11", "3026171", "2013", "ТОП-0,66 У3", "ГЗО",
+        "Восточное производственное отделение", "18.07.2025", "17.07.2030",
+        "пригодно", "", "ГОСТ 8.217-2024", "Наседкин Дмитрий Александрович",
+        "27007.04.2Р.00564940", "14883-95", "46434-11", "59851-15",
+        "99936", "ОВ-51", "52719", "21,4", "101,8", "30,7"
+    ]
+    unfit = [
+        "2746-71", "327567", "1975", "М416", "ГЗС",
+        'филиал ПАО "Россети Волга" - "Самарские РС", Самарское ПО, Красноярский РЭС',
+        "17.11.2025", "", "непригодно", "Превышение допустимой погрешности", "ГОСТ 8.409-81",
+        "Кондрашин Дмитрий Витальевич", "6332.77.4Р.00304693", "46434-11", "", "",
+        "ОВ-51", "", "", "22,9", "756,5", "32,8"
+    ]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="366092")
+        cell.alignment = Alignment(horizontal="center")
+    for r_idx, row_data in enumerate([example, unfit], 2):
+        for c_idx, val in enumerate(row_data, 1):
+            ws.cell(row=r_idx, column=c_idx, value=val)
+    wb.save(filepath)
+
+def create_accreditation_template(filepath: str):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Данные для аккредитации"
+    headers = ["Номер Аршин", "Тип поверяемого СИ", "Дата результатов поверки", "Дата действия", "Результат поверки", "СНИЛС", "Фамилия и Имя"]
+    example = ["С-ГЗО/18-07-2025/462546997", "ЗНОМ-35-65 У1", "18.07.2025", "17.07.2030", "пригодно", "10786907691", "Наседкин Дмитрий"]
+    unfit = ["С-ГЗО/18-07-2025/462546998", "ЗНОМ-35-65 У1", "18.07.2025", "", "непригодно", "10786907692", "Иванов Петр"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="366092")
+        cell.alignment = Alignment(horizontal="center")
+    for r_idx, row_data in enumerate([example, unfit], 2):
+        for c_idx, val in enumerate(row_data, 1):
+            ws.cell(row=r_idx, column=c_idx, value=val)
+    wb.save(filepath)
+
+def read_excel_data(filepath: str, skip_header=True) -> List[List[str]]:
+    wb = load_workbook(filepath, data_only=True)
+    ws = wb.active
+    rows = []
+    for row in ws.iter_rows(values_only=True):
+        str_row = [str(cell) if cell is not None else '' for cell in row]
+        rows.append(str_row)
+    if skip_header and len(rows) > 1:
+        rows = rows[1:]
+    rows = [r for r in rows if any(cell.strip() for cell in r)]
+    return rows
+
+# ----------------------------------------------------------------------
+# GUI-класс приложения
+# ----------------------------------------------------------------------
+class App:
+    def __init__(self, root):
+        self.root = root
+        root.title("Генератор XML для Аршин и Росаккредитации")
+        root.geometry("1300x800")
+        root.configure(bg="#f0f0f0")
+
+        # Стили
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Treeview", background="white", foreground="black", rowheight=25, fieldbackground="white")
+        style.map('Treeview', background=[('selected', '#347083')])
+
+        # Вкладки
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # Фреймы для вкладок
+        self.arshin_frame = ttk.Frame(self.notebook)
+        self.accred_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.arshin_frame, text="🏭 Генератор XML для Аршин")
+        self.notebook.add(self.accred_frame, text="⚡ Конфигуратор аккредитации")
+
+        # Инициализация таблиц
+        self.init_arshin_tab()
+        self.init_accreditation_tab()
+
+        # Статусная строка
+        self.status_var = tk.StringVar()
+        self.status_var.set("Готов к работе")
+        status_bar = ttk.Label(root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # ------------------------------------------------------------------
+    # Вкладка Аршин
+    # ------------------------------------------------------------------
+    def init_arshin_tab(self):
+        # Верхняя панель с кнопками
+        btn_frame = ttk.Frame(self.arshin_frame)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Button(btn_frame, text="➕ Добавить строку", command=self.arshin_add_row).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="➖ Удалить строку", command=self.arshin_remove_row).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="📥 Скачать шаблон Excel", command=self.arshin_download_template).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="📂 Загрузить Excel", command=self.arshin_load_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="⚡ Сгенерировать XML", command=self.arshin_generate_xml).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="💾 Сохранить XML", command=self.arshin_save_xml).pack(side=tk.LEFT, padx=2)
+
+        # Таблица с данными (Treeview)
+        self.arshin_columns = [
+            "Номер в ГРСИ*", "Зав. номер*", "Год*", "Модификация", "Шифр знака*", "Владелец*",
+            "Дата поверки*", "Дата действия", "Пригодность*", "Причина непригодности",
+            "Документ*", "Метролог*", "Эталон*", "Тип СИ1", "Тип СИ2", "Тип СИ3",
+            "№ СИ1", "№ СИ2", "№ СИ3", "Температура", "Давление", "Влажность"
+        ]
+        self.arshin_tree = ttk.Treeview(self.arshin_frame, columns=self.arshin_columns, show="headings", height=15)
+        for col in self.arshin_columns:
+            self.arshin_tree.heading(col, text=col)
+            self.arshin_tree.column(col, width=120, anchor="center")
+        # Скроллбары
+        v_scroll = ttk.Scrollbar(self.arshin_frame, orient="vertical", command=self.arshin_tree.yview)
+        h_scroll = ttk.Scrollbar(self.arshin_frame, orient="horizontal", command=self.arshin_tree.xview)
+        self.arshin_tree.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+        self.arshin_tree.pack(fill='both', expand=True, padx=5, pady=5)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Редактирование ячеек через Entry
+        self.arshin_tree.bind("<Double-1>", self.arshin_edit_cell)
+
+        # Добавим одну строку с примером
+        self.arshin_add_row()
+
+        # Текстовое поле для вывода XML
+        xml_frame = ttk.LabelFrame(self.arshin_frame, text="Результат XML для Аршин")
+        xml_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.arshin_xml_text = scrolledtext.ScrolledText(xml_frame, wrap=tk.NONE, font=("Courier New", 10))
+        self.arshin_xml_text.pack(fill=tk.BOTH, expand=True)
+
+    def arshin_add_row(self):
+        # Добавляем новую строку в таблицу. Используем словарь с пустыми значениями
+        empty_vals = {col: "" for col in self.arshin_columns}
+        # Установим значение по умолчанию для пригодности
+        empty_vals["Пригодность*"] = "пригодно"
+        self.arshin_tree.insert("", tk.END, values=[empty_vals[col] for col in self.arshin_columns])
+
+    def arshin_remove_row(self):
+        selected = self.arshin_tree.selection()
+        if not selected:
+            messagebox.showwarning("Удаление", "Выберите строку для удаления.")
+            return
+        for item in selected:
+            self.arshin_tree.delete(item)
+
+    def arshin_edit_cell(self, event):
+        """Двойной клик: открывает всплывающее окно для редактирования ячейки.
+           Для столбца "Пригодность*" используется выпадающий список."""
+        item = self.arshin_tree.selection()[0]
+        col = self.arshin_tree.identify_column(event.x)  # формат "#1", "#2"...
+        col_index = int(col[1:]) - 1
+        col_name = self.arshin_columns[col_index]
+        current_value = self.arshin_tree.item(item, "values")[col_index]
+
+        # Создаём всплывающее окно
+        popup = tk.Toplevel(self.root)
+        popup.title(f"Редактировать {col_name}")
+        popup.geometry("400x100")
+        popup.grab_set()
+
+        if col_name == "Пригодность*":
+            var = tk.StringVar(value=current_value)
+            combo = ttk.Combobox(popup, textvariable=var, values=["пригодно", "непригодно"], state="readonly")
+            combo.pack(pady=20, padx=20, fill=tk.X)
+            def save():
+                new_val = var.get()
+                values = list(self.arshin_tree.item(item, "values"))
+                values[col_index] = new_val
+                self.arshin_tree.item(item, values=values)
+                popup.destroy()
+            ttk.Button(popup, text="Сохранить", command=save).pack(pady=10)
+        else:
+            entry = ttk.Entry(popup)
+            entry.insert(0, current_value)
+            entry.pack(pady=20, padx=20, fill=tk.X)
+            entry.focus()
+            def save():
+                new_val = entry.get()
+                values = list(self.arshin_tree.item(item, "values"))
+                values[col_index] = new_val
+                self.arshin_tree.item(item, values=values)
+                popup.destroy()
+            popup.bind("<Return>", lambda e: save())
+            ttk.Button(popup, text="Сохранить", command=save).pack(pady=10)
+
+    def arshin_download_template(self):
+        filepath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
+        if filepath:
+            try:
+                create_arshin_template(filepath)
+                self.status_var.set(f"Шаблон сохранён: {filepath}")
+            except Exception as e:
+                messagebox.showerror("Ошибка", str(e))
+
+    def arshin_load_excel(self):
+        filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        if not filepath:
+            return
+        try:
+            rows = read_excel_data(filepath, skip_header=True)
+            # Очистить текущую таблицу
+            for item in self.arshin_tree.get_children():
+                self.arshin_tree.delete(item)
+            # Добавить строки (нормализация данных)
+            for row in rows:
+                # Дополнить до 22 колонок
+                row_ext = list(row) + [''] * (22 - len(row))
+                # Форматируем даты
+                if len(row_ext) > 6:
+                    row_ext[6] = format_date(row_ext[6])
+                if len(row_ext) > 7:
+                    row_ext[7] = format_date(row_ext[7])
+                if len(row_ext) > 8:
+                    if is_unfit(row_ext[8]):
+                        row_ext[8] = "непригодно"
+                    else:
+                        row_ext[8] = "пригодно"
+                # Вставляем в таблицу
+                self.arshin_tree.insert("", tk.END, values=row_ext[:22])
+            self.status_var.set(f"Загружено {len(rows)} строк из {filepath}")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить Excel:\n{str(e)}")
+
+    def arshin_generate_xml(self):
+        # Собираем все строки из таблицы
+        data_rows = []
+        for item in self.arshin_tree.get_children():
+            values = list(self.arshin_tree.item(item, "values"))
+            # Преобразуем None в пустую строку
+            values = [str(v) if v is not None else "" for v in values]
+            data_rows.append(values)
+        if not data_rows:
+            messagebox.showwarning("Нет данных", "Таблица пуста. Добавьте данные.")
+            return
+        try:
+            xml_str = generate_arshin_xml(data_rows)
+            self.arshin_xml_text.delete(1.0, tk.END)
+            self.arshin_xml_text.insert(tk.END, xml_str)
+            self.status_var.set("XML для Аршин сгенерирован")
+        except Exception as e:
+            messagebox.showerror("Ошибка генерации", str(e))
+
+    def arshin_save_xml(self):
+        content = self.arshin_xml_text.get(1.0, tk.END).strip()
+        if not content or content.startswith("XML будет отображен"):
+            messagebox.showwarning("Нет XML", "Сначала сгенерируйте XML.")
+            return
+        filepath = filedialog.asksaveasfilename(defaultextension=".xml", filetypes=[("XML files", "*.xml")])
+        if filepath:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.status_var.set(f"XML сохранён: {filepath}")
+
+    # ------------------------------------------------------------------
+    # Вкладка аккредитации (аналогично)
+    # ------------------------------------------------------------------
+    def init_accreditation_tab(self):
+        btn_frame = ttk.Frame(self.accred_frame)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Button(btn_frame, text="➕ Добавить строку", command=self.accred_add_row).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="➖ Удалить строку", command=self.accred_remove_row).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="📥 Скачать шаблон Excel", command=self.accred_download_template).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="📂 Загрузить Excel", command=self.accred_load_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="⚡ Сгенерировать XML", command=self.accred_generate_xml).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="💾 Сохранить XML", command=self.accred_save_xml).pack(side=tk.LEFT, padx=2)
+
+        self.accred_columns = [
+            "Номер Аршин*", "Тип СИ*", "Дата поверки*", "Дата действия*",
+            "Результат*", "СНИЛС*", "ФИО*"
+        ]
+        self.accred_tree = ttk.Treeview(self.accred_frame, columns=self.accred_columns, show="headings", height=15)
+        for col in self.accred_columns:
+            self.accred_tree.heading(col, text=col)
+            self.accred_tree.column(col, width=150, anchor="center")
+        v_scroll = ttk.Scrollbar(self.accred_frame, orient="vertical", command=self.accred_tree.yview)
+        h_scroll = ttk.Scrollbar(self.accred_frame, orient="horizontal", command=self.accred_tree.xview)
+        self.accred_tree.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+        self.accred_tree.pack(fill='both', expand=True, padx=5, pady=5)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.accred_tree.bind("<Double-1>", self.accred_edit_cell)
+        self.accred_add_row()
+
+        xml_frame = ttk.LabelFrame(self.accred_frame, text="Результат XML для аккредитации")
+        xml_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.accred_xml_text = scrolledtext.ScrolledText(xml_frame, wrap=tk.NONE, font=("Courier New", 10))
+        self.accred_xml_text.pack(fill=tk.BOTH, expand=True)
+
+    def accred_add_row(self):
+        empty = {col: "" for col in self.accred_columns}
+        empty["Результат*"] = "пригодно"
+        self.accred_tree.insert("", tk.END, values=[empty[col] for col in self.accred_columns])
+
+    def accred_remove_row(self):
+        selected = self.accred_tree.selection()
+        if not selected:
+            messagebox.showwarning("Удаление", "Выберите строку для удаления.")
+            return
+        for item in selected:
+            self.accred_tree.delete(item)
+
+    def accred_edit_cell(self, event):
+        item = self.accred_tree.selection()[0]
+        col = self.accred_tree.identify_column(event.x)
+        col_index = int(col[1:]) - 1
+        col_name = self.accred_columns[col_index]
+        current = self.accred_tree.item(item, "values")[col_index]
+
+        popup = tk.Toplevel(self.root)
+        popup.title(f"Редактировать {col_name}")
+        popup.geometry("400x100")
+        popup.grab_set()
+
+        if col_name == "Результат*":
+            var = tk.StringVar(value=current)
+            combo = ttk.Combobox(popup, textvariable=var, values=["пригодно", "непригодно"], state="readonly")
+            combo.pack(pady=20, fill=tk.X, padx=20)
+            def save():
+                values = list(self.accred_tree.item(item, "values"))
+                values[col_index] = var.get()
+                self.accred_tree.item(item, values=values)
+                popup.destroy()
+            ttk.Button(popup, text="Сохранить", command=save).pack(pady=10)
+        else:
+            entry = ttk.Entry(popup)
+            entry.insert(0, current)
+            entry.pack(pady=20, fill=tk.X, padx=20)
+            entry.focus()
+            def save():
+                values = list(self.accred_tree.item(item, "values"))
+                values[col_index] = entry.get()
+                self.accred_tree.item(item, values=values)
+                popup.destroy()
+            popup.bind("<Return>", lambda e: save())
+            ttk.Button(popup, text="Сохранить", command=save).pack(pady=10)
+
+    def accred_download_template(self):
+        filepath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
+        if filepath:
+            try:
+                create_accreditation_template(filepath)
+                self.status_var.set(f"Шаблон аккредитации сохранён: {filepath}")
+            except Exception as e:
+                messagebox.showerror("Ошибка", str(e))
+
+    def accred_load_excel(self):
+        filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        if not filepath:
+            return
+        try:
+            rows = read_excel_data(filepath, skip_header=True)
+            for item in self.accred_tree.get_children():
+                self.accred_tree.delete(item)
+            for row in rows:
+                row_ext = list(row) + [''] * (7 - len(row))
+                # Нормализация дат и результата
+                if len(row_ext) > 2:
+                    row_ext[2] = format_date(row_ext[2])
+                if len(row_ext) > 3:
+                    row_ext[3] = format_date(row_ext[3])
+                if len(row_ext) > 4:
+                    row_ext[4] = normalize_verification_result(row_ext[4])
+                self.accred_tree.insert("", tk.END, values=row_ext[:7])
+            self.status_var.set(f"Загружено {len(rows)} строк для аккредитации")
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e))
+
+    def accred_generate_xml(self):
+        data_rows = []
+        for item in self.accred_tree.get_children():
+            values = list(self.accred_tree.item(item, "values"))
+            values = [str(v) if v is not None else "" for v in values]
+            data_rows.append(values)
+        if not data_rows:
+            messagebox.showwarning("Нет данных", "Таблица аккредитации пуста.")
+            return
+        try:
+            xml_str = generate_accreditation_xml(data_rows)
+            self.accred_xml_text.delete(1.0, tk.END)
+            self.accred_xml_text.insert(tk.END, xml_str)
+            self.status_var.set("XML для аккредитации сгенерирован")
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e))
+
+    def accred_save_xml(self):
+        content = self.accred_xml_text.get(1.0, tk.END).strip()
+        if not content or content.startswith("XML будет отображен"):
+            messagebox.showwarning("Нет XML", "Сначала сгенерируйте XML.")
+            return
+        filepath = filedialog.asksaveasfilename(defaultextension=".xml", filetypes=[("XML files", "*.xml")])
+        if filepath:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.status_var.set(f"XML сохранён: {filepath}")
+
+# ----------------------------------------------------------------------
+# Запуск
+# ----------------------------------------------------------------------
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
